@@ -1,0 +1,36 @@
+version: "3.9"
+services:
+  postgres:
+    image: postgres:16
+    container_name: multitenant-postgres
+    environment:
+      POSTGRES_DB: multitenant
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d multitenant"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    container_name: multitenant-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/multitenant
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      JWT_SECRET: VGhpc0lzQVN1cGVyU2VjdXJlQmFzZTY0S2V5VGhhdElzQXRMZWFzdDMyQnl0ZXNMb25n
+      JWT_EXPIRATION_MS: 3600000
+    ports:
+      - "8080:8080"
+
+volumes:
+  postgres_data:
