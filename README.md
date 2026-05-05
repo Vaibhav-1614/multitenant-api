@@ -1,150 +1,141 @@
 # Multitenant API
 
-Spring Boot REST API for **multi-tenant project management**: users belong to a tenant; **JWT** carries tenant context; **projects** are fully CRUD-scoped per tenant.
+A production-minded Spring Boot REST API for tenant-isolated project management.
+Each authenticated request is resolved to a tenant through JWT claims, and all
+project operations are scoped to that tenant automatically.
 
-## Stack
+## Why this project
+
+This project demonstrates practical multi-tenant backend patterns:
+
+- Tenant-aware authentication and authorization
+- Strong API boundaries that prevent cross-tenant data access
+- Clean error handling and predictable API responses
+- OpenAPI/Swagger-first developer experience
+- Testable architecture with integration tests
+
+## Tech stack
 
 | Area | Choice |
 |------|--------|
-| Runtime | Java **17**, Spring Boot **3.3.x** |
-| Persistence | Spring Data JPA, Hibernate, **PostgreSQL** (H2 in tests) |
-| Security | Spring Security, **JWT** (JJWT), BCrypt passwords |
-| API docs | **SpringDoc OpenAPI 3** (Swagger UI) |
-| Rate limiting | **Bucket4j** — **100 requests / minute per tenant** (authenticated traffic) |
-| Packaging | Maven; optional **Docker** + **docker-compose** |
+| Runtime | Java 17, Spring Boot 3.3.x |
+| Security | Spring Security, JWT (JJWT), BCrypt |
+| Data | Spring Data JPA, Hibernate, PostgreSQL |
+| API docs | SpringDoc OpenAPI 3 (Swagger UI) |
+| Rate limiting | Bucket4j (per-tenant limits on authenticated traffic) |
+| Build | Maven |
 
-## What’s included
+## Core features
 
-### Domain model (`entity`, `repository`)
+### Authentication
 
-- **BaseEntity** — shared auditing fields (`id`, `createdAt`, `updatedAt`).
-- **Tenant** — billing/plan-friendly tenant record.
-- **User** — email, hashed password, `UserRole`, linked **tenant**.
-- **Project** — name, description, status; scoped by **tenant**.
-- **Task** — linked to **Project** + **User**, `TaskStatus` enum  
-  *(schema present; REST surface in this iteration focuses on **projects** and **auth**.)*
+- `POST /api/auth/register` registers a user against an existing tenant.
+- `POST /api/auth/login` returns a JWT for authenticated access.
+- JWT validation is handled by `JwtFilter`.
+- Tenant context is exposed via `UserPrincipal`.
 
-### Auth (`auth`, `security`)
+### Tenant-scoped project management
 
-- `POST /api/auth/register` — create user against an existing **tenant ID** (`RegisterRequest`: email, password, role, tenantId).
-- `POST /api/auth/login` — returns **JWT** for subsequent calls.
-- **JwtFilter** validates Bearer tokens; **UserPrincipal** exposes user id + **tenant id** for downstream code.
-- **SecurityConfig** — stateless session, JWT filter + **RateLimitFilter** chain.
-
-### Tenant-scoped projects (`project`)
-
-- `GET /api/projects` — paginated list (**Spring Data Pageable**, tenant-only).
+- `GET /api/projects` (paginated)
 - `GET /api/projects/{id}`
 - `POST /api/projects`
 - `PUT /api/projects/{id}`
-- `DELETE /api/projects/{id}`  
+- `DELETE /api/projects/{id}`
 
-All `/api/projects/**` endpoints require authentication; tenant comes from JWT, **not** from the URL.
+All project endpoints require authentication. Tenant identity comes from the JWT,
+not from URL parameters, which helps enforce isolation at the API layer.
 
-### Cross-cutting (`exception`)
+### Error handling and consistency
 
-- **GlobalExceptionHandler** + **ApiError** JSON error shape (timestamp, HTTP status, message, path).
-- **ResourceNotFoundException** mapped to clean 404s.
+- `GlobalExceptionHandler` standardizes error responses.
+- `ApiError` includes timestamp, status, message, and request path.
+- `ResourceNotFoundException` maps to clean 404 responses.
 
-### Entry point & docs
+### API documentation
 
-- **`GET /**` redirects to **Swagger UI** so the base URL is useful in the browser (`web/RootController`).
-- OpenAPI UI: **`/swagger-ui.html`** (or `/swagger-ui/index.html`).  
-  Use **Authorize** with `Bearer <token>` after login.
+- `GET /` redirects to Swagger UI.
+- Swagger UI is available at `/swagger-ui.html` or `/swagger-ui/index.html`.
+- Use `Bearer <token>` in the Swagger Authorize flow after login.
 
-### Tests (`src/test`)
+## Domain model
 
-- **MockMvc** integration tests against **auth** endpoints with **H2** (`application-test.yml`).
+- `Tenant`: tenant account boundary
+- `User`: email/password/role, linked to tenant
+- `Project`: tenant-owned project entity
+- `Task`: schema included, linked to project and user (API focus is auth + projects in this iteration)
+- `BaseEntity`: shared id and audit timestamps
 
-### Docker
+## Getting started
 
-- **`Dockerfile`** — multi-stage JVM image for the app.
-- **`docker-compose.yml`** — **Postgres 16** + app; uses **development-only** defaults for DB/JWT (`postgres` DB password inside the compose network). Override with real secrets in production.
+### Prerequisites
 
----
+- JDK 17
+- Maven 3.9+
+- PostgreSQL running locally
 
-## Prerequisites
+Create a database named `multitenant` and ensure at least one tenant row exists
+before calling the register endpoint (registration requires a valid `tenantId`).
 
-- **JDK 17** and **Maven 3.9+** (or Docker Desktop for compose builds).
-- A **PostgreSQL** database named **`multitenant`** (when not using Compose), and at least one **tenant** row registered so registrations can reference a valid **`tenant_id`**.
+### Environment variables
 
----
-
-## Configuration & secrets
-
-The app reads settings from **`src/main/resources/application.yml`**. Sensitive values come from **environment variables** — **do not commit real production passwords or JWT secrets.**
+The app reads configuration from `src/main/resources/application.yml` and
+expects sensitive values from environment variables.
 
 | Variable | Purpose |
 |----------|---------|
 | `DB_URL` | JDBC URL (default `jdbc:postgresql://localhost:5432/multitenant`) |
-| `DB_USERNAME` | DB user |
-| `DB_PASSWORD` | DB password (**set explicitly for local Postgres** when not using default `postgres`) |
-| `JWT_SECRET` | Base64-compatible signing secret (**change in prod**) |
-| `JWT_EXPIRATION_MS` | Token lifetime |
-| `SERVER_PORT` | Optional (default **8080**) |
+| `DB_USERNAME` | Database username |
+| `DB_PASSWORD` | Database password |
+| `JWT_SECRET` | JWT signing secret (use a strong value) |
+| `JWT_EXPIRATION_MS` | Token expiration in milliseconds |
+| `SERVER_PORT` | Optional server port (default `8080`) |
 
-**Committed files:** only **defaults** (`postgres`-style placeholders in YAML and Compose for local/docker dev). `.gitignore` excludes `.env`, `.env.local`, `target/`, and `.local-tools/`.
-
----
-
-## Run locally (Maven)
+### Run locally
 
 ```bash
-cd multitenant-api
-export DB_URL=jdbc:postgresql://localhost:5432/multitenant
-export DB_USERNAME=postgres
-export DB_PASSWORD=<your-password>
-export JWT_SECRET=<long-random-base64-compatible-string>
-export JWT_EXPIRATION_MS=3600000
+set DB_URL=jdbc:postgresql://localhost:5432/multitenant
+set DB_USERNAME=postgres
+set DB_PASSWORD=<your-password>
+set JWT_SECRET=<long-random-secret>
+set JWT_EXPIRATION_MS=3600000
 mvn spring-boot:run
 ```
 
-Then open **http://localhost:8080/** (redirects to Swagger).
+Then open `http://localhost:8080/` to access Swagger.
+
+### Test and verify
 
 ```bash
-mvn test          # integration tests with H2
-mvn clean verify # full CI-style build
+mvn test
+mvn clean verify
 ```
 
-## Run with Docker Compose
+## Typical API flow
 
-```bash
-docker compose up --build
-```
+1. Seed or create a tenant in the database.
+2. Register a user with that tenant id.
+3. Log in to receive a JWT.
+4. Authorize in Swagger using `Bearer <token>`.
+5. Call project CRUD endpoints.
 
-App: **http://localhost:8080** — DB credentials match `docker-compose.yml` unless you change them.
+If rate limits are exceeded, the API returns HTTP 429 with an `ApiError` payload.
 
----
+## Project structure
 
-## Quick API workflow (Swagger)
-
-1. Ensure a tenant exists (e.g. seed `tenants` in DB).
-2. **Register** with `tenantId` pointing at that tenant.
-3. **Login**, copy JWT.
-4. **Authorize** in Swagger (`Bearer <token>`).
-5. Call **Projects** CRUD.
-
-Rate limits apply **per tenant** after authentication (429 with JSON **ApiError** when exceeded).
-
----
-
-## Project layout (high level)
-
-```
+```text
 src/main/java/com/example/multitenantapi/
 ├── MultitenantApiApplication.java
 ├── auth/
-├── config/          SecurityConfig, SwaggerConfig
+├── config/
 ├── entity/
 ├── exception/
 ├── project/
 ├── repository/
-├── security/        JwtFilter, JwtUtil, RateLimitFilter, UserPrincipal
-└── web/             RootController (redirect to Swagger)
+├── security/
+└── web/
 ```
 
----
+## Notes
 
-## License / disclaimer
-
-Toy **example** codebase: replace default JWT secrets, tighten security defaults, add production-ready observability and tenant provisioning APIs before exposing publicly.
+This is a strong foundation for a multi-tenant backend. Before production use,
+rotate secrets, tighten security defaults, and add tenant lifecycle/admin APIs.
