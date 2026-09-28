@@ -4,138 +4,150 @@ A production-minded Spring Boot REST API for tenant-isolated project management.
 Each authenticated request is resolved to a tenant through JWT claims, and all
 project operations are scoped to that tenant automatically.
 
+![Swagger UI](docs/screenshots/01_swagger_overview.png)
+
 ## Why this project
 
 This project demonstrates practical multi-tenant backend patterns:
 
-- Tenant-aware authentication and authorization
-- Strong API boundaries that prevent cross-tenant data access
-- Clean error handling and predictable API responses
+- Self-service tenant sign-up with role-based membership management
+- Tenant-aware authentication and authorization (JWT + method security)
+- Strong API boundaries that prevent cross-tenant data access, covered by integration tests
+- Per-tenant and per-IP rate limiting
+- Consistent JSON errors for every failure path (400/401/403/404/409/429/500)
 - OpenAPI/Swagger-first developer experience
-- Testable architecture with integration tests
 
 ## Tech stack
 
 | Area | Choice |
 |------|--------|
 | Runtime | Java 17, Spring Boot 3.3.x |
-| Security | Spring Security, JWT (JJWT), BCrypt |
-| Data | Spring Data JPA, Hibernate, PostgreSQL |
+| Security | Spring Security, JWT (JJWT), BCrypt, `@PreAuthorize` |
+| Data | Spring Data JPA, Hibernate, PostgreSQL (H2 for tests) |
 | API docs | SpringDoc OpenAPI 3 (Swagger UI) |
-| Rate limiting | Bucket4j (per-tenant limits on authenticated traffic) |
+| Rate limiting | Bucket4j (per tenant for API traffic, per client IP for `/api/auth/**`) |
 | Build | Maven |
 
 ## Core features
 
-### Authentication
+### Authentication and tenants
 
-- `POST /api/auth/register` registers a user against an existing tenant.
-- `POST /api/auth/login` returns a JWT for authenticated access.
-- JWT validation is handled by `JwtFilter`.
-- Tenant context is exposed via `UserPrincipal`.
+- `POST /api/auth/register` creates a **new tenant** and makes the caller its first `ADMIN`, returning a JWT.
+  Registration never joins an existing tenant; extra fields such as `tenantId` or `role` are ignored.
+- `POST /api/auth/login` returns a JWT for an existing user.
+- `GET /api/tenants/me` returns the caller's tenant.
+- `GET /api/tenants/me/users` and `POST /api/tenants/me/users` (**ADMIN only**) list and add members of the caller's tenant.
 
 ### Tenant-scoped project management
 
-- `GET /api/projects` (paginated)
+- `GET /api/projects` (paginated: `page`, `size`, `sort=name,asc`)
 - `GET /api/projects/{id}`
 - `POST /api/projects`
 - `PUT /api/projects/{id}`
 - `DELETE /api/projects/{id}`
 
-All project endpoints require authentication. Tenant identity comes from the JWT,
-not from URL parameters, which helps enforce isolation at the API layer.
+Tenant identity always comes from the JWT, never from the URL or request body. Requesting
+another tenant's project id returns `404`, so the API does not reveal that the project exists.
 
-### Error handling and consistency
+### Error handling
 
-- `GlobalExceptionHandler` standardizes error responses.
-- `ApiError` includes timestamp, status, message, and request path.
-- `ResourceNotFoundException` maps to clean 404 responses.
+Every error, including those raised in security filters before Spring MVC runs, returns the same `ApiError` shape:
 
-### API documentation
+```json
+{ "timestamp": "2026-09-28T20:45:10Z", "status": 404, "message": "Project not found", "path": "/api/projects/4" }
+```
 
-- `GET /` redirects to Swagger UI.
-- Swagger UI is available at `/swagger-ui.html` or `/swagger-ui/index.html`.
-- Use `Bearer <token>` in the Swagger Authorize flow after login.
+| Situation | Status |
+|---|---|
+| Validation failure, malformed JSON, unknown sort field | 400 |
+| Missing/invalid token, wrong password | 401 |
+| Non-admin calling an admin endpoint | 403 |
+| Resource not found or owned by another tenant | 404 |
+| Duplicate data | 409 |
+| Rate limit exceeded | 429 |
+| Unexpected error (details are logged server-side, never returned) | 500 |
+
+## Screenshots
+
+| Tenant-scoped project list | Cross-tenant access blocked |
+|---|---|
+| ![Projects](docs/screenshots/02_tenant_scoped_projects.png) | ![404 for another tenant's project](docs/screenshots/03_cross_tenant_access_blocked.png) |
+
+![Admin-only member listing](docs/screenshots/04_admin_tenant_members.png)
 
 ## Domain model
 
-- `Tenant`: tenant account boundary
-- `User`: email/password/role, linked to tenant
+- `Tenant`: tenant account boundary (name, plan)
+- `User`: email, password hash, and role (`ADMIN` / `USER`), linked to a tenant
 - `Project`: tenant-owned project entity
-- `Task`: schema included, linked to project and user (API focus is auth + projects in this iteration)
-- `BaseEntity`: shared id and audit timestamps
+- `Task`: schema included, linked to project and user (the API currently covers auth, tenants, and projects)
+- `BaseEntity`: shared id and creation timestamp
 
 ## Getting started
 
-### Prerequisites
+### Option A: Docker Compose
 
-- JDK 17
-- Maven 3.9+
-- PostgreSQL running locally
+```bash
+docker compose up --build
+```
 
-Create a database named `multitenant` and ensure at least one tenant row exists
-before calling the register endpoint (registration requires a valid `tenantId`).
+### Option B: Local JDK + PostgreSQL
 
-### Environment variables
-
-The app reads configuration from `src/main/resources/application.yml` and
-expects sensitive values from environment variables.
+Prerequisites: JDK 17, Maven 3.9+, and a PostgreSQL database named `multitenant`.
+The schema is created automatically on startup, and no seed data is needed.
 
 | Variable | Purpose |
 |----------|---------|
 | `DB_URL` | JDBC URL (default `jdbc:postgresql://localhost:5432/multitenant`) |
-| `DB_USERNAME` | Database username |
-| `DB_PASSWORD` | Database password |
-| `JWT_SECRET` | JWT signing secret (use a strong value) |
-| `JWT_EXPIRATION_MS` | Token expiration in milliseconds |
+| `DB_USERNAME` / `DB_PASSWORD` | Database credentials |
+| `JWT_SECRET` | Base64-encoded HMAC key, at least 256 bits. **Always override the dev default outside local use.** |
+| `JWT_EXPIRATION_MS` | Token lifetime (default 1 hour) |
+| `RATE_LIMIT_TENANT_PER_MINUTE` | Authenticated requests per tenant per minute (default 100) |
+| `RATE_LIMIT_AUTH_PER_MINUTE` | `/api/auth/**` requests per client IP per minute (default 20) |
 | `SERVER_PORT` | Optional server port (default `8080`) |
 
-### Run locally
-
 ```bash
-set DB_URL=jdbc:postgresql://localhost:5432/multitenant
-set DB_USERNAME=postgres
-set DB_PASSWORD=<your-password>
-set JWT_SECRET=<long-random-secret>
-set JWT_EXPIRATION_MS=3600000
 mvn spring-boot:run
 ```
 
-Then open `http://localhost:8080/` to access Swagger.
+Then open `http://localhost:8080/` (redirects to Swagger UI).
 
-### Test and verify
+### Typical API flow
+
+1. `POST /api/auth/register` with `{"tenantName": "Acme", "email": "...", "password": "..."}`.
+2. Click **Authorize** in Swagger and paste the returned `accessToken`.
+3. Create and list projects; they are visible only inside your tenant.
+4. As an admin, add teammates with `POST /api/tenants/me/users`.
+
+### Tests
 
 ```bash
 mvn test
-mvn clean verify
 ```
 
-## Typical API flow
-
-1. Seed or create a tenant in the database.
-2. Register a user with that tenant id.
-3. Log in to receive a JWT.
-4. Authorize in Swagger using `Bearer <token>`.
-5. Call project CRUD endpoints.
-
-If rate limits are exceeded, the API returns HTTP 429 with an `ApiError` payload.
+12 integration tests (MockMvc + H2) cover sign-up, login, validation, 401/403 handling,
+admin-only endpoints, project CRUD, and cross-tenant isolation (read, update, and delete
+of another tenant's project all return 404).
 
 ## Project structure
 
 ```text
 src/main/java/com/example/multitenantapi/
 ├── MultitenantApiApplication.java
-├── auth/
-├── config/
+├── auth/        # register/login
+├── config/      # security chain, Swagger
 ├── entity/
-├── exception/
-├── project/
+├── exception/   # ApiError + GlobalExceptionHandler
+├── project/     # tenant-scoped CRUD
 ├── repository/
-├── security/
+├── security/    # JWT filter, rate limiter, JSON error writer
+├── tenant/      # current tenant + admin member management
 └── web/
 ```
 
-## Notes
+## Next steps
 
-This is a strong foundation for a multi-tenant backend. Before production use,
-rotate secrets, tighten security defaults, and add tenant lifecycle/admin APIs.
+- Refresh tokens and token revocation
+- Task endpoints on top of the existing `Task` entity
+- Flyway migrations instead of `ddl-auto: update` for production schemas
+- Distributed rate limiting (Bucket4j + Redis) when running more than one instance
