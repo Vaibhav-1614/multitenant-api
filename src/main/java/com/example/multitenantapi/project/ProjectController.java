@@ -1,6 +1,7 @@
 package com.example.multitenantapi.project;
 
 import jakarta.validation.Valid;
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
@@ -25,7 +26,7 @@ public class ProjectController {
     }
 
     @GetMapping
-    public ResponseEntity<Page<ProjectDTO>> getAll(Pageable pageable) {
+    public ResponseEntity<Page<ProjectDTO>> getAll(@ParameterObject Pageable pageable) {
         return ResponseEntity.ok(projectService.findAll(pageable));
     }
 
