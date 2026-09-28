@@ -2,6 +2,7 @@ package com.example.multitenantapi.auth;
 
 import com.example.multitenantapi.entity.Tenant;
 import com.example.multitenantapi.entity.User;
+import com.example.multitenantapi.entity.UserRole;
 import com.example.multitenantapi.repository.TenantRepository;
 import com.example.multitenantapi.repository.UserRepository;
 import com.example.multitenantapi.security.JwtUtil;
@@ -9,9 +10,12 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 @Service
 public class AuthService {
+
+    private static final String DEFAULT_PLAN = "FREE";
 
     private final UserRepository userRepository;
     private final TenantRepository tenantRepository;
@@ -31,22 +35,24 @@ public class AuthService {
     }
 
     @Transactional
-    public void register(RegisterRequest request) {
+    public AuthResponse register(RegisterRequest request) {
         if (userRepository.existsByEmail(request.getEmail())) {
             throw new IllegalArgumentException("Email already registered");
         }
 
-        Tenant tenant = tenantRepository.findById(request.getTenantId())
-                .orElseThrow(() -> new IllegalArgumentException("Tenant not found"));
+        Tenant tenant = tenantRepository.save(Tenant.builder()
+                .name(request.getTenantName().trim())
+                .plan(StringUtils.hasText(request.getPlan()) ? request.getPlan().trim().toUpperCase() : DEFAULT_PLAN)
+                .build());
 
-        User user = User.builder()
+        User user = userRepository.save(User.builder()
                 .email(request.getEmail())
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
-                .role(request.getRole())
+                .role(UserRole.ADMIN)
                 .tenant(tenant)
-                .build();
+                .build());
 
-        userRepository.save(user);
+        return issueToken(user);
     }
 
     @Transactional(readOnly = true)
@@ -58,9 +64,12 @@ public class AuthService {
             throw new BadCredentialsException("Invalid email or password");
         }
 
-        String token = jwtUtil.generateToken(user);
+        return issueToken(user);
+    }
+
+    private AuthResponse issueToken(User user) {
         return AuthResponse.builder()
-                .accessToken(token)
+                .accessToken(jwtUtil.generateToken(user))
                 .expiresInMs(jwtUtil.getExpirationMs())
                 .build();
     }

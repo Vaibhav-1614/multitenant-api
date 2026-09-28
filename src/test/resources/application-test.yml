@@ -16,3 +16,6 @@ app:
   jwt:
     secret: VGhpc0lzQVN1cGVyU2VjdXJlQmFzZTY0S2V5VGhhdElzQXRMZWFzdDMyQnl0ZXNMb25n
     expiration-ms: 3600000
+  rate-limit:
+    tenant-requests-per-minute: 1000
+    auth-requests-per-minute: 1000

@@ -21,3 +21,6 @@ app:
   jwt:
     secret: ${JWT_SECRET:VGhpc0lzQVN1cGVyU2VjdXJlQmFzZTY0S2V5VGhhdElzQXRMZWFzdDMyQnl0ZXNMb25n}
     expiration-ms: ${JWT_EXPIRATION_MS:3600000}
+  rate-limit:
+    tenant-requests-per-minute: ${RATE_LIMIT_TENANT_PER_MINUTE:100}
+    auth-requests-per-minute: ${RATE_LIMIT_AUTH_PER_MINUTE:20}

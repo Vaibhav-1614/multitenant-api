@@ -14,7 +14,13 @@ public class SwaggerConfig {
     public OpenAPI openAPI() {
         String schemeName = "bearerAuth";
         return new OpenAPI()
-                .info(new Info().title("Multitenant API").version("v1"))
+                .info(new Info()
+                        .title("Multitenant API")
+                        .version("v1")
+                        .description("Tenant-isolated project management API. "
+                                + "1) POST /api/auth/register to create a tenant and its first ADMIN, "
+                                + "2) click Authorize and paste the accessToken, "
+                                + "3) every project call is automatically scoped to your tenant."))
                 .addSecurityItem(new SecurityRequirement().addList(schemeName))
                 .schemaRequirement(
                         schemeName,
